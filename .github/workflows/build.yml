@@ -97,14 +97,16 @@ jobs:
           set -euo pipefail
           original="prerelease-dist/Plain Craft Launcher 2.exe"
           test -s "$original"
-          asset="prerelease-dist/Plain Craft Launcher (PCL) - Minecraft Download Enabled.exe"
+          asset="prerelease-dist/Plain Craft Launcher (PCL) - Modrinth Region Checked.exe"
           mv "$original" "$asset"
-          tag="pcl-minecraft-download-${GITHUB_SHA:0:8}"
+          tag="pcl-modrinth-region-${GITHUB_SHA:0:8}"
           cat > prerelease-notes.md <<'NOTES'
           Third-party modified build of Plain Craft Launcher (PCL), not an official PCL release.
 
-          Change: Minecraft version downloads are enabled by setting RestrictMcDownload to False.
-          Built with the repository's Windows Release configuration; this is a preview build, not a gameplay/download compatibility certification.
+          Change: Modrinth-only community resources; CurseForge network features are paused but source is retained.
+          Mainland China (CN) downloads are denied using best-effort IP and proxy signals; any uncertainty fails closed.
+          No Microsoft Client ID is bundled. This does not guarantee actual GPS location, detect every VPN, or prevent client modification.
+          Preview Windows Release build; not certified for download policy enforcement or Minecraft Services authentication.
 
           Original PCL project: https://github.com/Meloong-Git/PCL
           Source and licensing guidance: https://github.com/Ray20123315/PCL/blob/main/LICENCE
@@ -112,7 +114,7 @@ jobs:
           gh release create "$tag" "$asset" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "Plain Craft Launcher (PCL) - Minecraft Download Enabled (Pre-release)" \
+            --title "Plain Craft Launcher (PCL) - Modrinth Region Checked (Pre-release)" \
             --prerelease \
             --latest=false \
             --notes-file prerelease-notes.md
