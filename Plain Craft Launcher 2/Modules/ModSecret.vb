@@ -83,7 +83,7 @@ Friend Module ModSecret
     Public Const EnableCurseForge As Boolean = False
     '公开版启用地理区域限制；私有构建可以独立覆盖此常量。
     Public Const EnableRegionCheck As Boolean = True
-    '地区判定与下载限制共用缓存。只查询公开网络出口 IP 的国家代码，不使用 GPS。
+    '地区判定与下载限制共用缓存：优先使用获得许可的装置位置，随后检查 Windows 地区和网络出口。
     Public Structure RegionStatus
         Public CountryCode As String
         Public DownloadAllowed As Boolean
@@ -112,6 +112,105 @@ Friend Module ModSecret
     Private Function IsValidCountryCode(Value As String) As Boolean
         If String.IsNullOrWhiteSpace(Value) OrElse Value.Length <> 2 OrElse Value = "XX" Then Return False
         Return Value.All(Function(Ch) Ch >= "A"c AndAlso Ch <= "Z"c)
+    End Function
+
+    'Windows 国家/地区设置是用户可编辑的信号，不单独授予下载权限。
+    <System.Runtime.InteropServices.DllImport("kernel32.dll", EntryPoint:="GetUserGeoID")>
+    Private Function NativeGetUserGeoID(GeoClass As Integer) As Integer
+    End Function
+
+    <System.Runtime.InteropServices.DllImport("kernel32.dll", EntryPoint:="GetGeoInfoW", CharSet:=System.Runtime.InteropServices.CharSet.Unicode)>
+    Private Function NativeGetGeoInfo(GeoId As Integer, GeoType As Integer, Value As System.Text.StringBuilder,
+                                      ValueLength As Integer, LangId As Integer) As Integer
+    End Function
+
+    Private Function GetWindowsRegionCountry() As String
+        Try
+            Dim GeoId = NativeGetUserGeoID(16) 'GEOCLASS_NATION
+            If GeoId <= 0 Then Return Nothing
+            Dim Buffer As New System.Text.StringBuilder(16)
+            If NativeGetGeoInfo(GeoId, 4, Buffer, Buffer.Capacity, 0) <= 0 Then Return Nothing 'GEO_ISO2
+            Dim Country = Buffer.ToString().Trim().ToUpperInvariant()
+            Return If(IsValidCountryCode(Country), Country, Nothing)
+        Catch
+            Return Nothing
+        End Try
+    End Function
+
+    'Natural Earth 1:110m 公共领域国界数据离线查询，不上传原始经纬度。
+    Private Function PointInBorderRing(Lat As Double, Lon As Double, Ring As Newtonsoft.Json.Linq.JArray) As Boolean
+        If Ring.Count < 4 Then Return False
+        Dim Inside As Boolean = False
+        Dim Previous = DirectCast(Ring(Ring.Count - 1), Newtonsoft.Json.Linq.JArray)
+        For Each Current As Newtonsoft.Json.Linq.JArray In Ring.Children(Of Newtonsoft.Json.Linq.JArray)()
+            Dim X1 = Current(0).Value(Of Double)(), Y1 = Current(1).Value(Of Double)()
+            Dim X2 = Previous(0).Value(Of Double)(), Y2 = Previous(1).Value(Of Double)()
+            If (Y1 > Lat) <> (Y2 > Lat) Then
+                If Lon < (X2 - X1) * (Lat - Y1) / (Y2 - Y1) + X1 Then Inside = Not Inside
+            End If
+            Previous = Current
+        Next
+        Return Inside
+    End Function
+
+    Private Function CountryAtCoordinate(Lat As Double, Lon As Double, Features As Newtonsoft.Json.Linq.JArray) As String
+        For Each Feature As Newtonsoft.Json.Linq.JObject In Features.Children(Of Newtonsoft.Json.Linq.JObject)()
+            Dim Code = Feature("c").ToString()
+            Dim Polygons = DirectCast(Feature("p"), Newtonsoft.Json.Linq.JArray)
+            For Each Polygon As Newtonsoft.Json.Linq.JArray In Polygons.Children(Of Newtonsoft.Json.Linq.JArray)()
+                If Polygon.Count = 0 Then Continue For
+                If Not PointInBorderRing(Lat, Lon, DirectCast(Polygon(0), Newtonsoft.Json.Linq.JArray)) Then Continue For
+                Dim InHole As Boolean = False
+                For HoleIndex As Integer = 1 To Polygon.Count - 1
+                    If PointInBorderRing(Lat, Lon, DirectCast(Polygon(HoleIndex), Newtonsoft.Json.Linq.JArray)) Then
+                        InHole = True
+                        Exit For
+                    End If
+                Next
+                If Not InHole Then Return Code
+            Next
+        Next
+        Return Nothing
+    End Function
+
+    '只在用户明确同意后请求高精度 Windows 装置定位。
+    'Windows 可以使用 GPS、Wi-Fi 等定位技术，不保证实际使用卫星 GPS。
+    Private Function GetDeviceCountry() As String
+        Try
+            Using Watcher As New System.Device.Location.GeoCoordinateWatcher(System.Device.Location.GeoPositionAccuracy.High)
+                If Not Watcher.TryStart(False, TimeSpan.FromSeconds(7)) Then Return Nothing
+                If Watcher.Permission <> System.Device.Location.GeoPositionPermission.Granted Then Return Nothing
+                Dim Coordinate = Watcher.Position.Location
+                If Coordinate Is Nothing OrElse Coordinate.IsUnknown Then Return Nothing
+                If Double.IsNaN(Coordinate.HorizontalAccuracy) OrElse Coordinate.HorizontalAccuracy > 10000 Then Return Nothing
+                Dim Latitude = Coordinate.Latitude, Longitude = Coordinate.Longitude
+                If Double.IsNaN(Latitude) OrElse Double.IsNaN(Longitude) OrElse
+                   Math.Abs(Latitude) > 90 OrElse Math.Abs(Longitude) > 180 Then Return Nothing
+
+                Dim Assembly = System.Reflection.Assembly.GetExecutingAssembly()
+                Using Stream = Assembly.GetManifestResourceStream("PCLRegionBorders")
+                    If Stream Is Nothing Then Return Nothing
+                    Using Reader As New System.IO.StreamReader(Stream)
+                        Dim Root = Newtonsoft.Json.Linq.JObject.Parse(Reader.ReadToEnd())
+                        Dim Features = DirectCast(Root("features"), Newtonsoft.Json.Linq.JArray)
+                        Dim Country = CountryAtCoordinate(Latitude, Longitude, Features)
+                        If Not IsValidCountryCode(Country) Then Return Nothing
+
+                        '邻近边界或离线地图无法确定时回退验证，避免边境定位偏差。
+                        Dim Offset = Math.Max(Coordinate.HorizontalAccuracy / 111320.0, 0.04)
+                        Dim LonOffset = Offset / Math.Max(Math.Cos(Latitude * Math.PI / 180.0), 0.1)
+                        If CountryAtCoordinate(Latitude + Offset, Longitude, Features) <> Country OrElse
+                           CountryAtCoordinate(Latitude - Offset, Longitude, Features) <> Country OrElse
+                           CountryAtCoordinate(Latitude, Longitude + LonOffset, Features) <> Country OrElse
+                           CountryAtCoordinate(Latitude, Longitude - LonOffset, Features) <> Country Then Return Nothing
+                        Return Country
+                    End Using
+                End Using
+            End Using
+        Catch
+            '不记录 GPS 坐标或向网络上传坐标，失败时由后备来源确认。
+            Return Nothing
+        End Try
     End Function
 
     '每个查询单独处理失败，避免把定位服务故障误判为 VPN。
@@ -188,6 +287,26 @@ Friend Module ModSecret
                 Return RegionStatusCache.Value
             End If
 
+            '设备定位优先。仅在使用者主动授权后访问 Windows 设备位置。
+            Dim ConsentValue = RegistryUtils.TryRead("HKEY_CURRENT_USER\Software\PCLRegionUi", "AllowDeviceLocationV1", Nothing)
+            Dim DeviceCountry As String = Nothing
+            If ConsentValue IsNot Nothing AndAlso ConsentValue.ToString() = "1" Then
+                DeviceCountry = GetDeviceCountry()
+            End If
+            If IsValidCountryCode(DeviceCountry) Then
+                Dim DeviceAllowed = Not EnableRegionCheck OrElse DeviceCountry <> "CN"
+                Dim DeviceReason = If(DeviceAllowed, "当前地区可以使用 Minecraft 下载。", "当前地区暂不支持 Minecraft 下载。")
+                Dim DeviceStatus As New RegionStatus With {
+                    .CountryCode = DeviceCountry, .DownloadAllowed = DeviceAllowed,
+                    .Reason = DeviceReason, .Details = "地区信息已更新。"
+                }
+                RegionStatusCache = DeviceStatus
+                RegionCheckExpires = Date.UtcNow.AddMinutes(5)
+                Return DeviceStatus
+            End If
+
+            'Windows 地区先取得并供判断参考；由于它可手动修改，下载放行仍需 IP 确认。
+            Dim WindowsCountry = GetWindowsRegionCountry()
             Dim First = System.Threading.Tasks.Task.Run(Function() LookupRegion(
                 "Cloudflare", "https://www.cloudflare.com/cdn-cgi/trace"))
             Dim Second = System.Threading.Tasks.Task.Run(Function() LookupRegion(
@@ -211,32 +330,26 @@ Friend Module ModSecret
                 End If
             Next
 
-            Dim CountryCode = If(AnyMainlandChina, "CN", If(ConfirmedCode IsNot Nothing, ConfirmedCode,
-                If(ValidCountries.Count = 1, ValidCountries(0) & "（待核实）", "未知")))
+            Dim DisplayFallback As String = If(ValidCountries.Count = 1, ValidCountries(0) & "（待核实）",
+                If(IsValidCountryCode(WindowsCountry), WindowsCountry & "（待核实）", "未知"))
+            Dim CountryCode = If(AnyMainlandChina, "CN", If(ConfirmedCode IsNot Nothing, ConfirmedCode, DisplayFallback))
+            '由于 Windows 国家/地区可手动修改，不用它单独解锁下载。
             Dim Allowed As Boolean = Not EnableRegionCheck OrElse
                 (Not AnyMainlandChina AndAlso ConfirmedCode IsNot Nothing AndAlso
                  ValidCountries.All(Function(C) C = ConfirmedCode))
             Dim Reason As String
             If Not EnableRegionCheck Then
-                Reason = "此版本未启用地区下载限制，定位信息仅供参考。"
+                Reason = "当前版本可以使用 Minecraft 下载。"
             ElseIf AnyMainlandChina Then
-                Reason = "有定位来源返回中国大陆（CN），已暂停 Minecraft 下载。"
-            ElseIf ValidCountries.Count = 0 Then
-                Reason = "所有 IP 定位服务均未成功，无法确认地区，下载已暂停。"
-            ElseIf ConfirmedCode Is Nothing Then
-                Reason = "IP 定位结果不足以互相核实，下载已暂停。"
-            ElseIf ValidCountries.Any(Function(C) C <> ConfirmedCode) Then
-                Reason = "IP 定位来源出现冲突，下载已暂停。"
+                Reason = "当前地区暂不支持 Minecraft 下载。"
+            ElseIf Allowed Then
+                Reason = "当前地区可以使用 Minecraft 下载。"
             Else
-                Reason = "两个定位来源一致，已允许 Minecraft 下载。"
+                Reason = "暂时无法确认下载服务的适用地区，请稍后重试。"
             End If
-
-            Dim Details = String.Join(vbCrLf, Results.Select(Function(R) R.Summary)) &
-                vbCrLf & "网络环境：" & GetNetworkHint() &
-                vbCrLf & "说明：定位的是网络出口，不是 GPS 或真实居住地。"
             Dim Status As New RegionStatus With {
                 .CountryCode = CountryCode, .DownloadAllowed = Allowed,
-                .Reason = Reason, .Details = Details
+                .Reason = Reason, .Details = "地区信息已更新。"
             }
             RegionStatusCache = Status
             RegionCheckExpires = Date.UtcNow.AddMinutes(5)

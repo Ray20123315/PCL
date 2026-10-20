@@ -458,10 +458,22 @@ Public Class FormMain
 
         Logger.Info($"第三阶段加载用时：{GetTimeMs() - ApplicationStartTick} ms")
     End Sub
-    '首次进入时展示地区与下载状态；之后常驻标题栏。只使用 IP 国家代码，不使用 GPS。
+    '首次进入时提示地区与下载状态；不在一般界面显示位置服务、代理检查等内部实现。
     Private _regionCheckRunning As Boolean = False
     Private Sub StartRegionStatusCheck(Optional ForceRefresh As Boolean = False)
         If _regionCheckRunning Then Return
+        '首次访问设备位置前征求明确同意。拒绝后仍可继续，不上传精确坐标。
+        Dim PermissionPath = "HKEY_CURRENT_USER\Software\PCLRegionUi"
+        Dim PermissionKey = "AllowDeviceLocationV1"
+        If RegistryUtils.TryRead(PermissionPath, PermissionKey, Nothing) Is Nothing Then
+            Dim Answer = System.Windows.MessageBox.Show(
+                "启动器希望使用 Windows 设备位置来确认所在国家或地区。" &
+                vbCrLf & "设备定位坐标仅在本机处理，不会上传到互联网。" &
+                vbCrLf & vbCrLf & "是否允许读取设备位置？拒绝不会影响启动器打开。",
+                "位置使用许可", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Question)
+            RegistryUtils.Write(PermissionPath, PermissionKey,
+                If(Answer = System.Windows.MessageBoxResult.Yes, "1", "0"))
+        End If
         _regionCheckRunning = True
         LabTitleRegion.Text = "地区：检测中 · 下载：待检查"
         RunInNewThread(
@@ -472,21 +484,19 @@ Public Class FormMain
                 Dim DisplayText = $"地区：{Status.CountryCode} · 下载：{DownloadText}"
                 RunInUi(Sub()
                             LabTitleRegion.Text = DisplayText
-                            LabTitleRegion.ToolTip = Status.Reason & vbCrLf & Status.Details & vbCrLf & "点击可重新检查。"
+                            LabTitleRegion.ToolTip = Status.Reason & vbCrLf & "点击可重新检查。"
                         End Sub)
                 '按地区检查与 Client ID 变体独立保存首次提示记录，避免互相覆盖。
-                Dim NoticeName = "RegionNoticeV2_" & If(EnableRegionCheck, "Checked", "Unchecked") &
+                Dim NoticeName = "RegionNoticeV3_" & If(EnableRegionCheck, "Checked", "Unchecked") &
                     If(String.IsNullOrWhiteSpace(OAuthClientId), "_NoMs", "_Ms")
                 Dim NoticePath = "HKEY_CURRENT_USER\Software\PCLRegionUi"
                 Dim Shown = If(RegistryUtils.TryRead(NoticePath, NoticeName, Nothing)?.ToString(), "") = "1"
                 If Not Shown OrElse ForceRefresh Then
-                    MyMsgBox($"当前网络出口地区：{Status.CountryCode}{vbCrLf}" &
+                    MyMsgBox($"当前地区：{Status.CountryCode}{vbCrLf}" &
                         $"Minecraft 下载功能：{DownloadText}{vbCrLf}" &
-                        $"地区检查：{If(EnableRegionCheck, "已启用", "未启用")}{vbCrLf}" &
+                        $"地区检查：{If(EnableRegionCheck, "已启用", "未启用")}{vbCrLf}{vbCrLf}" &
                         $"{Status.Reason}{vbCrLf}{vbCrLf}" &
-                        $"查询详情：{vbCrLf}{Status.Details}{vbCrLf}{vbCrLf}" &
-                        "代理或 VPN 线索仅用于辅助诊断，不会单独导致禁止下载。" &
-                        vbCrLf & "之后可点击左上角的地区信息重新检查。", "地区与下载状态")
+                        "之后可点击左上角的地区信息重新检查。", "地区与下载状态")
                     If Not Shown Then RegistryUtils.Write(NoticePath, NoticeName, "1")
                 End If
             Catch ex As Exception
