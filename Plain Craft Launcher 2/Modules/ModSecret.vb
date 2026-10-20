@@ -205,7 +205,7 @@ Friend Module ModSecret
             Dim AnyMainlandChina As Boolean = ValidCountries.Contains("CN")
             Dim ConfirmedCode As String = Nothing
             For Each Candidate In ValidCountries.Distinct()
-                If ValidCountries.Count(Function(C) C = Candidate) >= 2 Then
+                If ValidCountries.Where(Function(C) C = Candidate).Count() >= 2 Then
                     ConfirmedCode = Candidate
                     Exit For
                 End If
