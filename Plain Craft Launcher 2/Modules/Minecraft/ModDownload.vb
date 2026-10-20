@@ -1163,7 +1163,9 @@ Public Module ModDownload
     ''' OptiFabric 列表，官方源。
     ''' </summary>
     Public DlOptiFabricLoader As New LoaderTask(Of Integer, List(Of ResourceVersion))("OptiFabric List Loader",
-        Sub(Task As LoaderTask(Of Integer, List(Of ResourceVersion))) Task.Output = ResourceVersion.FromProjectId("322385", ResourcePlatforms.CurseForge, LoadDependencies:=False))
+        Sub(Task As LoaderTask(Of Integer, List(Of ResourceVersion))) Task.Output =
+            If(EnableCurseForge, ResourceVersion.FromProjectId("322385", ResourcePlatforms.CurseForge, LoadDependencies:=False),
+               New List(Of ResourceVersion)))
 
 #End Region
 
@@ -1175,6 +1177,10 @@ Public Module ModDownload
     ''' </summary>
     Public Function DlModRequest(Url As String, Optional Method As HttpMethod = Nothing,
                                  Optional Content As String = Nothing, Optional ContentType As String = Nothing) As JToken
+        If Not EnableCurseForge AndAlso
+           (Url.ContainsIgnoreCase("api.curseforge.com") OrElse Url.ContainsIgnoreCase("mod.mcimirror.top/curseforge")) Then
+            Throw New NotSupportedException("此版本已暂停 CurseForge API，请使用 Modrinth。")
+        End If
         Dim Urls As New List(Of (Url As String, Timeout As Integer))
         Dim McimUrl As String = DlSourceModGet(Url)
         If McimUrl <> Url Then

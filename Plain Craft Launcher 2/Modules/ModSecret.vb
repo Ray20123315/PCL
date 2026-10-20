@@ -79,7 +79,74 @@ Friend Module ModSecret
 
 #Region "网络鉴权"
 
-    Public Const RestrictMcDownload As Boolean = False
+    '保留 CurseForge 旧实现，默认只使用 Modrinth。
+    Public Const EnableCurseForge As Boolean = False
+    '公开版启用地理区域限制；私有构建可以独立覆盖此常量。
+    Public Const EnableRegionCheck As Boolean = True
+    Private ReadOnly RegionDecisionLock As New Object
+    Private RegionAllowedCache As Boolean? = Nothing
+    Private RegionCheckExpires As Date = Date.MinValue
+
+    '复用 PCL 原有 RestrictMcDownload 的限制入口。
+    Public ReadOnly Property RestrictMcDownload As Boolean
+        Get
+            If Not EnableRegionCheck Then Return False
+            SyncLock RegionDecisionLock
+                If RegionAllowedCache.HasValue AndAlso Date.UtcNow < RegionCheckExpires Then Return Not RegionAllowedCache.Value
+                Dim Allowed As Boolean = False
+                Try
+                    Allowed = IsRegionAllowed()
+                Catch
+                    '查询失败时保守处理，不直接放行。
+                    Allowed = False
+                End Try
+                RegionAllowedCache = Allowed
+                RegionCheckExpires = Date.UtcNow.AddMinutes(2)
+                Return Not Allowed
+            End SyncLock
+        End Get
+    End Property
+
+    '独立 HTTPS 位置服务只能验证出口位置，无法证明用户真实所在地。
+    Private Function IsRegionAllowed() As Boolean
+        If HasKnownProxyOrVpn() Then Return False
+        Using Client As New HttpClient()
+            Client.Timeout = TimeSpan.FromSeconds(8)
+            Client.DefaultRequestHeaders.UserAgent.ParseAdd("Ray20123315/PCL-RegionCheck/1.0")
+            Dim Trace = Client.GetStringAsync("https://www.cloudflare.com/cdn-cgi/trace").GetAwaiter().GetResult()
+            Dim Country As String = Nothing
+            For Each Line In Trace.Split({vbLf}, StringSplitOptions.RemoveEmptyEntries)
+                If Line.StartsWith("loc=", StringComparison.OrdinalIgnoreCase) Then
+                    Country = Line.Substring(4).Trim().ToUpperInvariant()
+                    Exit For
+                End If
+            Next
+            If Country Is Nothing OrElse Country.Length <> 2 OrElse Country = "CN" OrElse Country = "XX" Then Return False
+            Dim Result = Newtonsoft.Json.Linq.JObject.Parse(
+                Client.GetStringAsync("https://ipwho.is/").GetAwaiter().GetResult())
+            If Result("success") Is Nothing OrElse Not Result("success").ToObject(Of Boolean) Then Return False
+            Dim Country2 As String = If(Result("country_code")?.ToString(), "").ToUpperInvariant()
+            Return Country2.Length = 2 AndAlso Country2 <> "CN" AndAlso Country2 = Country
+        End Using
+    End Function
+
+    '只能识别一部分代理及 VPN，无法保证不存在未识别的网络隧道。
+    Private Function HasKnownProxyOrVpn() As Boolean
+        Try
+            Dim Proxy = System.Net.WebRequest.DefaultWebProxy
+            If Proxy IsNot Nothing AndAlso Not Proxy.IsBypassed(New Uri("https://www.cloudflare.com")) Then Return True
+            For Each Adapter In System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
+                If Adapter.OperationalStatus <> System.Net.NetworkInformation.OperationalStatus.Up Then Continue For
+                If Adapter.NetworkInterfaceType = System.Net.NetworkInformation.NetworkInterfaceType.Tunnel Then Return True
+                Dim Info = (Adapter.Name & " " & Adapter.Description).ToLowerInvariant()
+                If {"wireguard", "openvpn", "wintun", "tailscale", "zerotier", "softether", "tap-windows", "vpn", "tun "}.
+                    Any(Function(Marker) Info.Contains(Marker)) Then Return True
+            Next
+        Catch
+            Return True
+        End Try
+        Return False
+    End Function
     Friend Function SecretCdnSign(UrlWithMark As String) As String
         If Not UrlWithMark.EndsWithF("{CDN}") Then Return UrlWithMark
         Return UrlWithMark.Replace("{CDN}", "").Replace(" ", "%20")
@@ -98,7 +165,7 @@ Friend Module ModSecret
             End If
         End If
         If Not SimulateBrowserHeaders Then Req.Headers.Add("Referer", $"http://{VersionCode}.open.pcl2.server/")
-        If Url.Contains("api.curseforge.com") OrElse Url.Contains("forgecdn.net") Then Req.Headers.Add("x-api-key", CurseForgeAPIKey)
+        If EnableCurseForge AndAlso (Url.Contains("api.curseforge.com") OrElse Url.Contains("forgecdn.net")) Then Req.Headers.Add("x-api-key", CurseForgeAPIKey)
     End Sub
 
 #End Region

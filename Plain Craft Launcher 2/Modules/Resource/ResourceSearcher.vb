@@ -55,7 +55,7 @@ Public Class ResourceSearcher
         ''' <summary>
         ''' 允许的来源。
         ''' </summary>
-        Public Sources As ResourcePlatforms = ResourcePlatforms.Any
+        Public Sources As ResourcePlatforms = If(EnableCurseForge, ResourcePlatforms.Any, ResourcePlatforms.Modrinth)
         Public Sub New(Type As ResourceTypes, Storage As SearchResult, TargetResultCount As Integer)
             Me.Type = Type
             Me.Storage = Storage
@@ -164,6 +164,10 @@ Public Class ResourceSearcher
     Private Shared Sub Run(Task As LoaderTask(Of SearchRequest, Integer))
         Dim Request As SearchRequest = Task.Input
         Dim Storage = Request.Storage '避免其他线程对 Request.Storage 重新进行了赋值
+        If Not EnableCurseForge Then
+            Request.Sources = ResourcePlatforms.Modrinth
+            Storage.CurseForgeTotal = 0
+        End If
 
 #Region "前置检查"
 

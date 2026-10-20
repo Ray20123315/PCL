@@ -78,6 +78,16 @@ Public Class PageResource
 
     Private Sub PageResource_Loaded(sender As Object, e As EventArgs) Handles Me.Loaded
         Static IsFirstLoaded As Boolean = False
+        '只使用 Modrinth；保留旧界面选项以便恢复。
+        If Not EnableCurseForge Then
+            ComboSearchSource.SelectedIndex = 2
+            ComboSearchSource.IsEnabled = False
+            For Each TagItem As MyComboBoxItem In ComboSearchTag.Items
+                If TagItem.Tag IsNot Nothing AndAlso TagItem.Tag.ToString.EndsWithF("/") Then
+                    TagItem.Visibility = Visibility.Collapsed
+                End If
+            Next
+        End If
         '不知道从 Initialized 改成 Loaded 会不会有问题，但用 Initialized 会导致初始的筛选器修改被覆盖回默认值
         If TargetInstance IsNot Nothing Then
             '设置目标
@@ -127,7 +137,7 @@ Public Class PageResource
             .GameVersion = GameVersion
             .Tag = ComboSearchTag.SelectedItem.Tag
             .ModLoaders = If(PageType = ResourceTypes.Mod, Val(ComboSearchLoader.SelectedItem.Tag), ModLoaders.None)
-            .Sources = CType(Val(ComboSearchSource.SelectedItem.Tag), ResourcePlatforms)
+            .Sources = If(EnableCurseForge, CType(Val(ComboSearchSource.SelectedItem.Tag), ResourcePlatforms), ResourcePlatforms.Modrinth)
         End With
         Return Request
     End Function
@@ -155,7 +165,7 @@ Public Class PageResource
             Next
             '页码
             CardPages.Visibility = If(Storage.Results.Count > 40 OrElse
-                                      Storage.CurseForgeOffset < Storage.CurseForgeTotal OrElse Storage.ModrinthOffset < Storage.ModrinthTotal,
+                                      Storage.ModrinthOffset < Storage.ModrinthTotal OrElse (EnableCurseForge AndAlso Storage.CurseForgeOffset < Storage.CurseForgeTotal),
                                       Visibility.Visible, Visibility.Collapsed)
             LabPage.Text = Page + 1
             BtnPageFirst.IsEnabled = Page > 1
@@ -164,7 +174,7 @@ Public Class PageResource
             BtnPageLeft.Opacity = If(Page > 0, 1, 0.2)
             Dim IsRightEnabled As Boolean = '由于 WPF 的未知 bug，读取到的 IsEnabled 可能是错误的值（#3319）
                 Storage.Results.Count > PAGE_SIZE * (Page + 1) OrElse
-                Storage.CurseForgeOffset < Storage.CurseForgeTotal OrElse Storage.ModrinthOffset < Storage.ModrinthTotal
+                Storage.ModrinthOffset < Storage.ModrinthTotal OrElse (EnableCurseForge AndAlso Storage.CurseForgeOffset < Storage.CurseForgeTotal)
             BtnPageRight.IsEnabled = IsRightEnabled
             BtnPageRight.Opacity = If(IsRightEnabled, 1, 0.2)
             '错误信息
@@ -234,7 +244,7 @@ Public Class PageResource
         TextSearchName.Text = ""
         TextSearchVersion.Text = "全部 (也可自行输入)"
         TextSearchVersion.SelectedIndex = 0
-        ComboSearchSource.SelectedIndex = 0
+        ComboSearchSource.SelectedIndex = If(EnableCurseForge, 0, 2)
         ComboSearchTag.SelectedIndex = 0
         ComboSearchLoader.SelectedIndex = 0
         Loader.LastFinishedTime = 0 '要求强制重新开始

@@ -109,6 +109,14 @@ Public Module LocalResourceLoaders
             Dim CacheKey = ModEntry.ModrinthHash & Loader.Input.Target.VanillaName & ModLoaders
             If Cache.ContainsKey(CacheKey) Then
                 ModEntry.FromJson(Cache(CacheKey))
+                If Not EnableCurseForge AndAlso ModEntry.Project IsNot Nothing AndAlso
+                   ModEntry.Project.Platform = ResourcePlatforms.CurseForge Then
+                    ModEntry.Project = Nothing
+                    ModEntry.ProjectVersion = Nothing
+                    ModEntry.UpdateFile = Nothing
+                    ModEntry.ChangelogUrls.Clear()
+                    ModEntry.OnlineDataLoaded = False
+                End If
                 '如果缓存中的信息在 6 小时以内更新过，则无需重新获取
                 If ModEntry.OnlineDataLoaded AndAlso Date.Now - Cache(CacheKey)("Project")("CacheTime").ToObject(Of Date) < New TimeSpan(6, 0, 0) Then Continue For
             End If
@@ -202,7 +210,8 @@ Public Module LocalResourceLoaders
                 EndedThreadCount += 1
             End Try
         End Sub, "Mod List Detail Loader Modrinth")
-        '从 CurseForge 获取信息
+        '保留旧查询实现，关闭开关时不启动 CurseForge 线程。
+        If EnableCurseForge Then
         RunInNewThread(
         Sub()
             Try
@@ -318,8 +327,9 @@ Public Module LocalResourceLoaders
                 EndedThreadCount += 1
             End Try
         End Sub, "Mod List Detail Loader CurseForge")
+        End If
         '等待线程结束
-        Do Until EndedThreadCount = 2
+        Do Until EndedThreadCount = If(EnableCurseForge, 2, 1)
             Thread.Sleep(10)
             If Loader.IsCanceled Then Return
         Loop

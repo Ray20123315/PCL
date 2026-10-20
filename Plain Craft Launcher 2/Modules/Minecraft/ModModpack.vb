@@ -88,6 +88,7 @@ Public Module ModModpack
             If RestrictMcDownload Then Throw New Exception("为遵守相关法律法规，PCL 暂时不再提供 MC 下载功能，非常抱歉 qwq……")
             Select Case PackType
                 Case 0
+                    If Not EnableCurseForge Then Throw New NotSupportedException("此版本已暂停 CurseForge 整合包安装，请改用 Modrinth 整合包（.mrpack）。")
                     Logger.Info("整合包种类：CurseForge")
                     Return InstallPackCurseForge(File, Archive, ArchiveBaseFolder, InstanceName, Logo)
                 Case 1

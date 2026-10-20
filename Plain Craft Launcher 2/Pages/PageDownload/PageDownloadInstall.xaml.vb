@@ -309,7 +309,7 @@ Public Class PageDownloadInstall
             End If
         End If
         'OptiFabric
-        If SelectedFabric Is Nothing OrElse SelectedOptiFine Is Nothing Then
+        If Not EnableCurseForge OrElse SelectedFabric Is Nothing OrElse SelectedOptiFine Is Nothing Then
             CardOptiFabric.Visibility = Visibility.Collapsed
         Else
             CardOptiFabric.Visibility = Visibility.Visible
@@ -335,7 +335,7 @@ Public Class PageDownloadInstall
         Else
             HintFabricAPI.Visibility = Visibility.Collapsed
         End If
-        If SelectedFabric IsNot Nothing AndAlso SelectedOptiFine IsNot Nothing AndAlso SelectedOptiFabric Is Nothing Then
+        If EnableCurseForge AndAlso SelectedFabric IsNot Nothing AndAlso SelectedOptiFine IsNot Nothing AndAlso SelectedOptiFabric Is Nothing Then
             If VanillaDrop >= 140 AndAlso VanillaDrop <= 150 Then
                 HintOptiFabric.Visibility = Visibility.Collapsed
                 HintOptiFabricOld.Visibility = Visibility.Visible
