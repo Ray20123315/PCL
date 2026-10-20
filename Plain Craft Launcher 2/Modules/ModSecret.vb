@@ -83,17 +83,25 @@ Friend Module ModSecret
     Public Const EnableCurseForge As Boolean = False
     '公开版启用地理区域限制；私有构建可以独立覆盖此常量。
     Public Const EnableRegionCheck As Boolean = True
-    '地区判定与下载限制共用相同的缓存，避免显示的状态与实际下载政策不一致。
+    '地区判定与下载限制共用缓存。只查询公开网络出口 IP 的国家代码，不使用 GPS。
     Public Structure RegionStatus
         Public CountryCode As String
         Public DownloadAllowed As Boolean
         Public Reason As String
+        Public Details As String
     End Structure
+
+    Private Structure RegionLookup
+        Public Source As String
+        Public CountryCode As String
+        Public Summary As String
+    End Structure
+
     Private ReadOnly RegionDecisionLock As New Object
     Private RegionStatusCache As RegionStatus? = Nothing
     Private RegionCheckExpires As Date = Date.MinValue
 
-    '沿用 RestrictMcDownload 的所有既有限制入口。
+    '沿用原来的限制入口；非地区检查版始终不拦截 Minecraft 下载。
     Public ReadOnly Property RestrictMcDownload As Boolean
         Get
             If Not EnableRegionCheck Then Return False
@@ -101,80 +109,141 @@ Friend Module ModSecret
         End Get
     End Property
 
-    '仅查询网络出口国家代码，不申请 GPS 定位或保存精确位置。
+    Private Function IsValidCountryCode(Value As String) As Boolean
+        If String.IsNullOrWhiteSpace(Value) OrElse Value.Length <> 2 OrElse Value = "XX" Then Return False
+        Return Value.All(Function(Ch) Ch >= "A"c AndAlso Ch <= "Z"c)
+    End Function
+
+    '每个查询单独处理失败，避免把定位服务故障误判为 VPN。
+    Private Function LookupRegion(Source As String, Url As String, Optional Field As String = Nothing) As RegionLookup
+        Dim Result As New RegionLookup With {.Source = Source, .CountryCode = Nothing, .Summary = Source & "：查询失败或超时"}
+        Try
+            Using Client As New HttpClient()
+                Client.Timeout = TimeSpan.FromSeconds(6)
+                Client.DefaultRequestHeaders.UserAgent.ParseAdd("PCL2-Ray-Region/2.0")
+                Dim Text = Client.GetStringAsync(Url).GetAwaiter().GetResult()
+                Dim Country As String = Nothing
+                If Source = "Cloudflare" Then
+                    For Each Line In Text.Split({vbLf}, StringSplitOptions.RemoveEmptyEntries)
+                        If Line.StartsWith("loc=", StringComparison.OrdinalIgnoreCase) Then
+                            Country = Line.Substring(4).Trim().ToUpperInvariant()
+                            Exit For
+                        End If
+                    Next
+                Else
+                    Dim Json = Newtonsoft.Json.Linq.JObject.Parse(Text)
+                    If Source = "ipwho.is" AndAlso
+                       (Json("success") Is Nothing OrElse Not Json("success").ToObject(Of Boolean)) Then
+                        Result.Summary = Source & "：服务未返回有效查询结果"
+                        Return Result
+                    End If
+                    Country = If(Json(Field)?.ToString(), "").Trim().ToUpperInvariant()
+                End If
+                If IsValidCountryCode(Country) Then
+                    Result.CountryCode = Country
+                    Result.Summary = Source & "：" & Country
+                Else
+                    Result.Summary = Source & "：未返回有效国家代码"
+                End If
+            End Using
+        Catch ex As Exception
+            '只输出服务名与诊断分类，不打印原始响应或公网 IP。
+            Result.Summary = Source & "：连接失败或超时"
+        End Try
+        Return Result
+    End Function
+
+    '代理/VPN 线索仅供解释网络环境；Windows 默认代理和虚拟网卡不证明用户使用 VPN。
+    Private Function GetNetworkHint() As String
+        Try
+            Dim Hints As New List(Of String)
+            Dim Target As New Uri("https://www.cloudflare.com/")
+            Dim Proxy = System.Net.WebRequest.DefaultWebProxy
+            If Proxy IsNot Nothing Then
+                Dim Route = Proxy.GetProxy(Target)
+                If Route IsNot Nothing AndAlso Not Route.Equals(Target) Then
+                    Hints.Add("系统配置了代理路由")
+                End If
+            End If
+            For Each Adapter In System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
+                If Adapter.OperationalStatus <> System.Net.NetworkInformation.OperationalStatus.Up Then Continue For
+                Dim Name = (Adapter.Name & " " & Adapter.Description).ToLowerInvariant()
+                If {"wireguard", "openvpn", "wintun", "tailscale", "zerotier", "softether"}.Any(Function(X) Name.Contains(X)) Then
+                    Hints.Add("存在已启用的隧道网卡")
+                    Exit For
+                End If
+            Next
+            Return If(Hints.Count = 0, "未发现明确的代理线索（不代表不存在 VPN）",
+                String.Join("；", Hints) & "（仅供参考，未直接作为封锁依据）")
+        Catch ex As Exception
+            Return "代理检查不可用（不会被当作 VPN 证据）"
+        End Try
+    End Function
+
+    '至少两个定位源一致才视为已核实；第三个来源仅在前两个失败或冲突时启用。
+    '任一有效来源明确返回 CN 时保守拒绝，以免出现互相冲突却放行的情况。
     Public Function GetRegionStatus(Optional ForceRefresh As Boolean = False) As RegionStatus
         SyncLock RegionDecisionLock
             If Not ForceRefresh AndAlso RegionStatusCache.HasValue AndAlso Date.UtcNow < RegionCheckExpires Then
                 Return RegionStatusCache.Value
             End If
 
-            Dim Country As String = "未知"
-            Dim IsConfirmed As Boolean = False
-            Dim CheckError As String = Nothing
-            Try
-                Using Client As New HttpClient()
-                    Client.Timeout = TimeSpan.FromSeconds(8)
-                    Client.DefaultRequestHeaders.UserAgent.ParseAdd("Ray20123315/PCL-RegionCheck/1.1")
-                    Dim Trace = Client.GetStringAsync("https://www.cloudflare.com/cdn-cgi/trace").GetAwaiter().GetResult()
-                    For Each Line In Trace.Split({vbLf}, StringSplitOptions.RemoveEmptyEntries)
-                        If Line.StartsWith("loc=", StringComparison.OrdinalIgnoreCase) Then
-                            Dim Value = Line.Substring(4).Trim().ToUpperInvariant()
-                            If Value.Length = 2 AndAlso Value <> "XX" Then Country = Value
-                            Exit For
-                        End If
-                    Next
-                    Dim Result = Newtonsoft.Json.Linq.JObject.Parse(
-                        Client.GetStringAsync("https://ipwho.is/").GetAwaiter().GetResult())
-                    Dim Country2 As String = If(Result("country_code")?.ToString(), "").ToUpperInvariant()
-                    IsConfirmed = Country <> "未知" AndAlso Country2.Length = 2 AndAlso Country = Country2 AndAlso
-                        Result("success") IsNot Nothing AndAlso Result("success").ToObject(Of Boolean)
-                    If Not IsConfirmed Then CheckError = "两个 IP 定位来源未能一致确认国家或地区。"
-                End Using
-            Catch ex As Exception
-                CheckError = "无法取得完整的 IP 地区信息。"
-            End Try
+            Dim First = System.Threading.Tasks.Task.Run(Function() LookupRegion(
+                "Cloudflare", "https://www.cloudflare.com/cdn-cgi/trace"))
+            Dim Second = System.Threading.Tasks.Task.Run(Function() LookupRegion(
+                "ipwho.is", "https://ipwho.is/", "country_code"))
+            Dim Results As New List(Of RegionLookup) From {First.Result, Second.Result}
 
-            Dim ProxyDetected As Boolean = If(EnableRegionCheck, HasKnownProxyOrVpn(), False)
+            If Not IsValidCountryCode(Results(0).CountryCode) OrElse
+               Not IsValidCountryCode(Results(1).CountryCode) OrElse
+               Results(0).CountryCode <> Results(1).CountryCode Then
+                Results.Add(LookupRegion("country.is", "https://api.country.is/", "country"))
+            End If
+
+            Dim ValidCountries = Results.Where(Function(R) IsValidCountryCode(R.CountryCode)).
+                Select(Function(R) R.CountryCode).ToList()
+            Dim AnyMainlandChina As Boolean = ValidCountries.Contains("CN")
+            Dim ConfirmedCode As String = Nothing
+            For Each Candidate In ValidCountries.Distinct()
+                If ValidCountries.Count(Function(C) C = Candidate) >= 2 Then
+                    ConfirmedCode = Candidate
+                    Exit For
+                End If
+            Next
+
+            Dim CountryCode = If(AnyMainlandChina, "CN", If(ConfirmedCode, ConfirmedCode,
+                If(ValidCountries.Count = 1, ValidCountries(0) & "（待核实）", "未知")))
             Dim Allowed As Boolean = Not EnableRegionCheck OrElse
-                (IsConfirmed AndAlso Country <> "CN" AndAlso Not ProxyDetected)
+                (Not AnyMainlandChina AndAlso ConfirmedCode IsNot Nothing AndAlso
+                 ValidCountries.All(Function(C) C = ConfirmedCode))
             Dim Reason As String
             If Not EnableRegionCheck Then
-                Reason = "此版本未启用地区下载限制，IP 地区信息仅供参考。"
-            ElseIf Country = "CN" Then
-                Reason = "检测到中国大陆网络出口，Minecraft 下载已禁用。"
-            ElseIf ProxyDetected Then
-                Reason = "检测到可能影响地区判定的代理或 VPN，下载已暂停。"
-            ElseIf Not IsConfirmed Then
-                Reason = If(CheckError, "地区尚未得到确认，下载已暂停。")
+                Reason = "此版本未启用地区下载限制，定位信息仅供参考。"
+            ElseIf AnyMainlandChina Then
+                Reason = "有定位来源返回中国大陆（CN），已暂停 Minecraft 下载。"
+            ElseIf ValidCountries.Count = 0 Then
+                Reason = "所有 IP 定位服务均未成功，无法确认地区，下载已暂停。"
+            ElseIf ConfirmedCode Is Nothing Then
+                Reason = "IP 定位结果不足以互相核实，下载已暂停。"
+            ElseIf ValidCountries.Any(Function(C) C <> ConfirmedCode) Then
+                Reason = "IP 定位来源出现冲突，下载已暂停。"
             Else
-                Reason = "地区检查通过，可以使用 Minecraft 下载功能。"
+                Reason = "两个定位来源一致，已允许 Minecraft 下载。"
             End If
+
+            Dim Details = String.Join(vbCrLf, Results.Select(Function(R) R.Summary)) &
+                vbCrLf & "网络环境：" & GetNetworkHint() &
+                vbCrLf & "说明：定位的是网络出口，不是 GPS 或真实居住地。"
             Dim Status As New RegionStatus With {
-                .CountryCode = Country, .DownloadAllowed = Allowed, .Reason = Reason
+                .CountryCode = CountryCode, .DownloadAllowed = Allowed,
+                .Reason = Reason, .Details = Details
             }
             RegionStatusCache = Status
-            RegionCheckExpires = Date.UtcNow.AddMinutes(2)
+            RegionCheckExpires = Date.UtcNow.AddMinutes(5)
             Return Status
         End SyncLock
     End Function
 
-    '只能识别一部分代理及 VPN，无法保证不存在未识别的网络隧道。
-    Private Function HasKnownProxyOrVpn() As Boolean
-        Try
-            Dim Proxy = System.Net.WebRequest.DefaultWebProxy
-            If Proxy IsNot Nothing AndAlso Not Proxy.IsBypassed(New Uri("https://www.cloudflare.com")) Then Return True
-            For Each Adapter In System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
-                If Adapter.OperationalStatus <> System.Net.NetworkInformation.OperationalStatus.Up Then Continue For
-                If Adapter.NetworkInterfaceType = System.Net.NetworkInformation.NetworkInterfaceType.Tunnel Then Return True
-                Dim Info = (Adapter.Name & " " & Adapter.Description).ToLowerInvariant()
-                If {"wireguard", "openvpn", "wintun", "tailscale", "zerotier", "softether", "tap-windows", "vpn", "tun "}.
-                    Any(Function(Marker) Info.Contains(Marker)) Then Return True
-            Next
-        Catch
-            Return True
-        End Try
-        Return False
-    End Function
     Friend Function SecretCdnSign(UrlWithMark As String) As String
         If Not UrlWithMark.EndsWithF("{CDN}") Then Return UrlWithMark
         Return UrlWithMark.Replace("{CDN}", "").Replace(" ", "%20")

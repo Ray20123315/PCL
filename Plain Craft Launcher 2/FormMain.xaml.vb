@@ -472,10 +472,10 @@ Public Class FormMain
                 Dim DisplayText = $"地区：{Status.CountryCode} · 下载：{DownloadText}"
                 RunInUi(Sub()
                             LabTitleRegion.Text = DisplayText
-                            LabTitleRegion.ToolTip = Status.Reason & vbCrLf & "IP 定位仅代表网络出口地区。点击可重新检查。"
+                            LabTitleRegion.ToolTip = Status.Reason & vbCrLf & Status.Details & vbCrLf & "点击可重新检查。"
                         End Sub)
                 '按地区检查与 Client ID 变体独立保存首次提示记录，避免互相覆盖。
-                Dim NoticeName = "RegionNoticeV1_" & If(EnableRegionCheck, "Checked", "Unchecked") &
+                Dim NoticeName = "RegionNoticeV2_" & If(EnableRegionCheck, "Checked", "Unchecked") &
                     If(String.IsNullOrWhiteSpace(OAuthClientId), "_NoMs", "_Ms")
                 Dim NoticePath = "HKEY_CURRENT_USER\Software\PCLRegionUi"
                 Dim Shown = If(RegistryUtils.TryRead(NoticePath, NoticeName, Nothing)?.ToString(), "") = "1"
@@ -484,7 +484,8 @@ Public Class FormMain
                         $"Minecraft 下载功能：{DownloadText}{vbCrLf}" &
                         $"地区检查：{If(EnableRegionCheck, "已启用", "未启用")}{vbCrLf}" &
                         $"{Status.Reason}{vbCrLf}{vbCrLf}" &
-                        "地区信息来自 IP 检测，并非 GPS 定位；VPN 和代理可能影响结果。" &
+                        $"查询详情：{vbCrLf}{Status.Details}{vbCrLf}{vbCrLf}" &
+                        "代理或 VPN 线索仅用于辅助诊断，不会单独导致禁止下载。" &
                         vbCrLf & "之后可点击左上角的地区信息重新检查。", "地区与下载状态")
                     If Not Shown Then RegistryUtils.Write(NoticePath, NoticeName, "1")
                 End If
