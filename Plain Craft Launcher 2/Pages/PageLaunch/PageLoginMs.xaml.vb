@@ -91,7 +91,7 @@ Public Class PageLoginMs
                     Hint(ex.Message.TrimStart("$"), HintType.Red)
                 ElseIf IsMicrosoftHttp401(ex) Then
                     Logger.Error(ex, "微软正版登录失败（HTTP 401：未经授权）。请先确认 Microsoft 应用注册、账户授权及 Minecraft Services 是否允许此应用。" &
-                        vbCrLf & "401 可能发生在不同的登录阶段，不能仅凭状态码判断原因。请查看 PCL 日志中最后一条 “开始微软登录步骤” 并保留原始错误以便排查。", LogBehavior.Alert)
+                        vbCrLf & "401 可能发生在不同的登录阶段，不能仅凭状态码判断原因。请查看 PCL 日志中最后一条 '开始微软登录步骤' 并保留原始错误以便排查。", LogBehavior.Alert)
                 ElseIf TypeOf ex Is Security.Authentication.AuthenticationException AndAlso ex.Message.Contains("SSL/TLS") Then
                     Logger.Error(ex, $"正版登录验证失败，请考虑在 [设置 → 其他] 中关闭 [在正版登录时验证 SSL 证书]，然后再试。{vbCrLf}{vbCrLf}原始错误信息：", LogBehavior.Alert)
                 Else
