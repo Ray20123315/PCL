@@ -5,6 +5,7 @@ Public Class PageSetupSystem
 
         '重复加载部分
         PanBack.ScrollToHome()
+        RefreshRegistryIsolationButton()
 
         If BuildType = BuildTypes.Release Then
             PanDonate.Visibility = Visibility.Collapsed
@@ -36,6 +37,32 @@ Public Class PageSetupSystem
             Logger.Error(ex, "初始化启动器页设置失败", LogBehavior.Alert)
         End Try
         Reload()
+    End Sub
+
+    '注册表隔离（变更设置在重启后生效，不改变本次进程的设置目录）
+    Private Sub RefreshRegistryIsolationButton()
+        Dim Saved = GetRegistryIsolationChoice()
+        BtnSystemRegistryIsolation.Text = If(Saved.GetValueOrDefault(True), "已启用（隔离）", "已关闭（共用）") &
+            If(Saved.HasValue AndAlso Saved.Value <> RegistryIsolated, "（重启后生效）", "")
+    End Sub
+
+    Private Sub BtnSystemRegistryIsolation_Click(sender As Object, e As MouseButtonEventArgs) Handles BtnSystemRegistryIsolation.Click
+        Dim Answer = System.Windows.MessageBox.Show(
+            "是否要启用注册表隔离？" & vbCrLf & vbCrLf &
+            "是：使用开源版独立设置（PCLDebug）。" & vbCrLf &
+            "否：与 PCL 正式版共用设置（PCL）；修改会影响正式版。" & vbCrLf & vbCrLf &
+            "更改会在下次启动 PCL 时生效，不会自动复制或清除任何设置。",
+            "修改注册表隔离", System.Windows.MessageBoxButton.YesNoCancel,
+            System.Windows.MessageBoxImage.Question)
+        If Answer <> System.Windows.MessageBoxResult.Yes AndAlso
+           Answer <> System.Windows.MessageBoxResult.No Then Return
+
+        Dim Isolate = Answer = System.Windows.MessageBoxResult.Yes
+        Dim Saved = GetRegistryIsolationChoice()
+        If Saved.HasValue AndAlso Saved.Value = Isolate Then Return
+        If Not TrySaveRegistryIsolationChoice(Isolate) Then Return
+        RefreshRegistryIsolationButton()
+        MyMsgBox("注册表隔离选项已保存。重启 PCL 后生效。", "设置已保存")
     End Sub
 
     '滑动条

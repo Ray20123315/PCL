@@ -5,7 +5,71 @@ Friend Module ModSecret
     '标注 PCL 的不同分支，仅用于替换标记
     Public Const VersionBranchMain As String = "OpenSource"
     '在开源版的注册表与常规版的注册表隔离，以防数据冲突
-    Public Const RegFolder As String = "PCLDebug"
+    '用于保存选择的独立注册表路径，避免随隔离模式切换而丢失选择。
+    Private Const RegistryChoicePath As String = "HKEY_CURRENT_USER\Software\PCLRegistryChoice"
+    Private _registryIsolated As Boolean = True
+
+    Public ReadOnly Property RegFolder As String
+        Get
+            Return If(_registryIsolated, "PCLDebug", "PCL")
+        End Get
+    End Property
+
+    Public ReadOnly Property RegistryIsolated As Boolean
+        Get
+            Return _registryIsolated
+        End Get
+    End Property
+
+    '只接受明确存储的 0 / 1，未选择或无效时继续弹出首次选择。
+    Friend Function GetRegistryIsolationChoice() As Boolean?
+        Dim Saved = RegistryUtils.TryRead(RegistryChoicePath, "Isolated", Nothing)
+        If Saved Is Nothing Then Return Nothing
+        Select Case Saved.ToString()
+            Case "1"
+                Return True
+            Case "0"
+                Return False
+            Case Else
+                Return Nothing
+        End Select
+    End Function
+
+    Friend Function TrySaveRegistryIsolationChoice(Isolate As Boolean) As Boolean
+        Try
+            RegistryUtils.Write(RegistryChoicePath, "Isolated", If(Isolate, "1", "0"))
+            Dim Saved = GetRegistryIsolationChoice()
+            If Saved.HasValue AndAlso Saved.Value = Isolate Then Return True
+            Throw New InvalidOperationException("无法确认注册表选项已正确保存。")
+        Catch ex As Exception
+            System.Windows.MessageBox.Show("保存注册表隔离选项失败：" & ex.Message & vbCrLf &
+                "本次不会切换设置，请检查当前用户的注册表写入权限。", "保存失败",
+                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error)
+            Return False
+        End Try
+    End Function
+
+    '必须先决定注册表目录，才能加载启动器设置。
+    Friend Function InitializeRegistryIsolation() As Boolean
+        Dim Choice = GetRegistryIsolationChoice()
+        If Not Choice.HasValue Then
+            Dim Answer = System.Windows.MessageBox.Show(
+                "是否要启用注册表隔离？" & vbCrLf & vbCrLf &
+                "是：使用开源版独立设置（PCLDebug）。" & vbCrLf &
+                "否：与 PCL 正式版共用设置（PCL）；对设置的更改也会影响正式版。" & vbCrLf & vbCrLf &
+                "选择只需进行一次，之后可以在 设置 → 其他 中修改。" & vbCrLf &
+                "取消或关闭此窗口将退出启动器，下次启动会再次询问。",
+                "注册表隔离", System.Windows.MessageBoxButton.YesNoCancel,
+                System.Windows.MessageBoxImage.Question)
+            If Answer <> System.Windows.MessageBoxResult.Yes AndAlso
+               Answer <> System.Windows.MessageBoxResult.No Then Return False
+            Dim Isolate = Answer = System.Windows.MessageBoxResult.Yes
+            If Not TrySaveRegistryIsolationChoice(Isolate) Then Return False
+            Choice = Isolate
+        End If
+        _registryIsolated = Choice.Value
+        Return True
+    End Function
     '用于微软登录的 ClientId
     Public OAuthClientId As String = If(Environment.GetEnvironmentVariable("PCL_MS_CLIENT_ID"), "")
     'CurseForge API Key

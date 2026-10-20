@@ -120,6 +120,7 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <TextBlock VerticalAlignment="Center" HorizontalAlignment="Left" Text="启动器更新" Margin="0,0,25,0" />
                     <local:MyComboBox x:Name="ComboSystemUpdate" local:SettingService.Key="SystemSystemUpdate" Grid.Column="1">
@@ -162,6 +163,11 @@
                         <local:MyButton Grid.Column="0" x:Name="BtnSystemIdentify" MinWidth="140" Text="复制识别码" Padding="13,0" Margin="0,0,20,0" />
                         <local:MyButton Grid.Column="1" x:Name="BtnSystemUnlock" MinWidth="140" Text="输入土豆码" Padding="13,0" Margin="0,0,20,0" />
                     </Grid>
+                    <TextBlock Grid.Row="9" VerticalAlignment="Center" Text="注册表隔离" Margin="0,12,25,0"
+                               ToolTip="隔离时使用开源版独立设置；关闭隔离时与 PCL 正式版共用注册表设置。" />
+                    <local:MyButton Grid.Row="9" Grid.Column="1" x:Name="BtnSystemRegistryIsolation"
+                                    MinWidth="140" HorizontalAlignment="Left" Margin="0,12,0,0" Padding="13,0"
+                                    Text="修改注册表隔离" />
                 </Grid>
             </local:MyCard>
 
