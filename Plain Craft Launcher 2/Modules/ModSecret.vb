@@ -83,51 +83,79 @@ Friend Module ModSecret
     Public Const EnableCurseForge As Boolean = False
     '公开版启用地理区域限制；私有构建可以独立覆盖此常量。
     Public Const EnableRegionCheck As Boolean = True
+    '地区判定与下载限制共用相同的缓存，避免显示的状态与实际下载政策不一致。
+    Public Structure RegionStatus
+        Public CountryCode As String
+        Public DownloadAllowed As Boolean
+        Public Reason As String
+    End Structure
     Private ReadOnly RegionDecisionLock As New Object
-    Private RegionAllowedCache As Boolean? = Nothing
+    Private RegionStatusCache As RegionStatus? = Nothing
     Private RegionCheckExpires As Date = Date.MinValue
 
-    '复用 PCL 原有 RestrictMcDownload 的限制入口。
+    '沿用 RestrictMcDownload 的所有既有限制入口。
     Public ReadOnly Property RestrictMcDownload As Boolean
         Get
             If Not EnableRegionCheck Then Return False
-            SyncLock RegionDecisionLock
-                If RegionAllowedCache.HasValue AndAlso Date.UtcNow < RegionCheckExpires Then Return Not RegionAllowedCache.Value
-                Dim Allowed As Boolean = False
-                Try
-                    Allowed = IsRegionAllowed()
-                Catch
-                    '查询失败时保守处理，不直接放行。
-                    Allowed = False
-                End Try
-                RegionAllowedCache = Allowed
-                RegionCheckExpires = Date.UtcNow.AddMinutes(2)
-                Return Not Allowed
-            End SyncLock
+            Return Not GetRegionStatus().DownloadAllowed
         End Get
     End Property
 
-    '独立 HTTPS 位置服务只能验证出口位置，无法证明用户真实所在地。
-    Private Function IsRegionAllowed() As Boolean
-        If HasKnownProxyOrVpn() Then Return False
-        Using Client As New HttpClient()
-            Client.Timeout = TimeSpan.FromSeconds(8)
-            Client.DefaultRequestHeaders.UserAgent.ParseAdd("Ray20123315/PCL-RegionCheck/1.0")
-            Dim Trace = Client.GetStringAsync("https://www.cloudflare.com/cdn-cgi/trace").GetAwaiter().GetResult()
-            Dim Country As String = Nothing
-            For Each Line In Trace.Split({vbLf}, StringSplitOptions.RemoveEmptyEntries)
-                If Line.StartsWith("loc=", StringComparison.OrdinalIgnoreCase) Then
-                    Country = Line.Substring(4).Trim().ToUpperInvariant()
-                    Exit For
-                End If
-            Next
-            If Country Is Nothing OrElse Country.Length <> 2 OrElse Country = "CN" OrElse Country = "XX" Then Return False
-            Dim Result = Newtonsoft.Json.Linq.JObject.Parse(
-                Client.GetStringAsync("https://ipwho.is/").GetAwaiter().GetResult())
-            If Result("success") Is Nothing OrElse Not Result("success").ToObject(Of Boolean) Then Return False
-            Dim Country2 As String = If(Result("country_code")?.ToString(), "").ToUpperInvariant()
-            Return Country2.Length = 2 AndAlso Country2 <> "CN" AndAlso Country2 = Country
-        End Using
+    '仅查询网络出口国家代码，不申请 GPS 定位或保存精确位置。
+    Public Function GetRegionStatus(Optional ForceRefresh As Boolean = False) As RegionStatus
+        SyncLock RegionDecisionLock
+            If Not ForceRefresh AndAlso RegionStatusCache.HasValue AndAlso Date.UtcNow < RegionCheckExpires Then
+                Return RegionStatusCache.Value
+            End If
+
+            Dim Country As String = "未知"
+            Dim IsConfirmed As Boolean = False
+            Dim CheckError As String = Nothing
+            Try
+                Using Client As New HttpClient()
+                    Client.Timeout = TimeSpan.FromSeconds(8)
+                    Client.DefaultRequestHeaders.UserAgent.ParseAdd("Ray20123315/PCL-RegionCheck/1.1")
+                    Dim Trace = Client.GetStringAsync("https://www.cloudflare.com/cdn-cgi/trace").GetAwaiter().GetResult()
+                    For Each Line In Trace.Split({vbLf}, StringSplitOptions.RemoveEmptyEntries)
+                        If Line.StartsWith("loc=", StringComparison.OrdinalIgnoreCase) Then
+                            Dim Value = Line.Substring(4).Trim().ToUpperInvariant()
+                            If Value.Length = 2 AndAlso Value <> "XX" Then Country = Value
+                            Exit For
+                        End If
+                    Next
+                    Dim Result = Newtonsoft.Json.Linq.JObject.Parse(
+                        Client.GetStringAsync("https://ipwho.is/").GetAwaiter().GetResult())
+                    Dim Country2 As String = If(Result("country_code")?.ToString(), "").ToUpperInvariant()
+                    IsConfirmed = Country <> "未知" AndAlso Country2.Length = 2 AndAlso Country = Country2 AndAlso
+                        Result("success") IsNot Nothing AndAlso Result("success").ToObject(Of Boolean)
+                    If Not IsConfirmed Then CheckError = "两个 IP 定位来源未能一致确认国家或地区。"
+                End Using
+            Catch ex As Exception
+                CheckError = "无法取得完整的 IP 地区信息。"
+            End Try
+
+            Dim ProxyDetected As Boolean = If(EnableRegionCheck, HasKnownProxyOrVpn(), False)
+            Dim Allowed As Boolean = Not EnableRegionCheck OrElse
+                (IsConfirmed AndAlso Country <> "CN" AndAlso Not ProxyDetected)
+            Dim Reason As String
+            If Not EnableRegionCheck Then
+                Reason = "此版本未启用地区下载限制，IP 地区信息仅供参考。"
+            ElseIf Country = "CN" Then
+                Reason = "检测到中国大陆网络出口，Minecraft 下载已禁用。"
+            ElseIf ProxyDetected Then
+                Reason = "检测到可能影响地区判定的代理或 VPN，下载已暂停。"
+            ElseIf Not IsConfirmed Then
+                Reason = If(CheckError, "地区尚未得到确认，下载已暂停。")
+            Else
+                Reason = "地区检查通过，可以使用 Minecraft 下载功能。"
+            End If
+            Dim Status As New RegionStatus With {
+                .CountryCode = Country, .DownloadAllowed = Allowed, .Reason = Reason
+            }
+            RegionStatusCache = Status
+            RegionCheckExpires = Date.UtcNow.AddMinutes(2)
+            Return Status
+        End SyncLock
     End Function
 
     '只能识别一部分代理及 VPN，无法保证不存在未识别的网络隧道。

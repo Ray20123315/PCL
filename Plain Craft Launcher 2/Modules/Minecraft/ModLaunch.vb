@@ -560,6 +560,9 @@ NextInner:
             GoTo SkipLogin
         End If
         '尝试登录
+        If String.IsNullOrWhiteSpace(OAuthClientId) Then
+            Throw New Exception("$当前版本未配置 Microsoft Client ID，无法进行新的正版登录。请使用已配置 Client ID 的版本。")
+        End If
         Dim OAuthTokens As (OAuthAccessToken As String, OAuthRefreshToken As String)
         If Input.OAuthRefreshToken = "" Then
             '无 RefreshToken

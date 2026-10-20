@@ -447,14 +447,60 @@ Public Class FormMain
             End Try
             '上报
             Telemetry("启动")
-            '开源版本提示
+            '开源版本提示：依据实际构建是否提供 Client ID 更新提示，其他说明不变。
             If VersionBranchMain = "OpenSource" Then
-                MyMsgBox($"该版本中无法使用以下特性：{vbCrLf}- CurseForge API 调用：此修改版已暂停该功能，请使用 Modrinth{vbCrLf}- 正版登录：需要自行向微软申请 Client ID，然后添加到 ModSecret.vb 的开头{vbCrLf}- 更新与联网通知：避免滥用隐患{vbCrLf}- 主题切换：这是需要赞助解锁的纪念性质的功能，别让赞助者太伤心啦……{vbCrLf}- 百宝箱：开发早期往里面塞了些开发工具，整理起来太麻烦了……", "开源版本说明")
+                MyMsgBox($"该版本中无法使用以下特性：{vbCrLf}- CurseForge API 调用：此修改版已暂停该功能，请使用 Modrinth{vbCrLf}" &
+                    If(String.IsNullOrWhiteSpace(OAuthClientId), "- 正版登录：此构建未内置 Microsoft Client ID，无法直接使用正版登录。" & vbCrLf, "") &
+                    $"- 更新与联网通知：避免滥用隐患{vbCrLf}- 主题切换：这是需要赞助解锁的纪念性质的功能，别让赞助者太伤心啦……{vbCrLf}- 百宝箱：开发早期往里面塞了些开发工具，整理起来太麻烦了……", "开源版本说明")
             End If
+            RunInUi(Sub() StartRegionStatusCheck())
         End Sub, "初始化", ThreadPriority.Lowest)
 
         Logger.Info($"第三阶段加载用时：{GetTimeMs() - ApplicationStartTick} ms")
     End Sub
+    '首次进入时展示地区与下载状态；之后常驻标题栏。只使用 IP 国家代码，不使用 GPS。
+    Private _regionCheckRunning As Boolean = False
+    Private Sub StartRegionStatusCheck(Optional ForceRefresh As Boolean = False)
+        If _regionCheckRunning Then Return
+        _regionCheckRunning = True
+        LabTitleRegion.Text = "地区：检测中 · 下载：待检查"
+        RunInNewThread(
+        Sub()
+            Try
+                Dim Status = GetRegionStatus(ForceRefresh)
+                Dim DownloadText = If(Status.DownloadAllowed, "可用", "不可用")
+                Dim DisplayText = $"地区：{Status.CountryCode} · 下载：{DownloadText}"
+                RunInUi(Sub()
+                            LabTitleRegion.Text = DisplayText
+                            LabTitleRegion.ToolTip = Status.Reason & vbCrLf & "IP 定位仅代表网络出口地区。点击可重新检查。"
+                        End Sub)
+                '按地区检查与 Client ID 变体独立保存首次提示记录，避免互相覆盖。
+                Dim NoticeName = "RegionNoticeV1_" & If(EnableRegionCheck, "Checked", "Unchecked") &
+                    If(String.IsNullOrWhiteSpace(OAuthClientId), "_NoMs", "_Ms")
+                Dim NoticePath = "HKEY_CURRENT_USER\Software\PCLRegionUi"
+                Dim Shown = If(RegistryUtils.TryRead(NoticePath, NoticeName, Nothing)?.ToString(), "") = "1"
+                If Not Shown OrElse ForceRefresh Then
+                    MyMsgBox($"当前网络出口地区：{Status.CountryCode}{vbCrLf}" &
+                        $"Minecraft 下载功能：{DownloadText}{vbCrLf}" &
+                        $"地区检查：{If(EnableRegionCheck, "已启用", "未启用")}{vbCrLf}" &
+                        $"{Status.Reason}{vbCrLf}{vbCrLf}" &
+                        "地区信息来自 IP 检测，并非 GPS 定位；VPN 和代理可能影响结果。" &
+                        vbCrLf & "之后可点击左上角的地区信息重新检查。", "地区与下载状态")
+                    If Not Shown Then RegistryUtils.Write(NoticePath, NoticeName, "1")
+                End If
+            Catch ex As Exception
+                Logger.Warn(ex, "地区状态提示未能完成")
+            Finally
+                RunInUi(Sub() _regionCheckRunning = False)
+            End Try
+        End Sub, "Region Status Check", ThreadPriority.BelowNormal)
+    End Sub
+
+    Private Sub LabTitleRegion_MouseLeftButtonUp(sender As Object, e As MouseButtonEventArgs) Handles LabTitleRegion.MouseLeftButtonUp
+        e.Handled = True
+        StartRegionStatusCheck(True)
+    End Sub
+
     '根据打开次数触发的事件
     Private Sub RunCountSub()
         Settings.Set("SystemCount", Settings.Get(Of Integer)("SystemCount") + 1)

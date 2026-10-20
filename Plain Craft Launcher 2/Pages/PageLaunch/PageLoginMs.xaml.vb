@@ -89,6 +89,9 @@ Public Class PageLoginMs
                 If ex.IsCanceled Then
                 ElseIf ex.Message.StartsWithF("$") Then
                     Hint(ex.Message.TrimStart("$"), HintType.Red)
+                ElseIf IsMicrosoftHttp401(ex) Then
+                    Logger.Error(ex, "微软正版登录失败（HTTP 401：未经授权）。请先确认 Microsoft 应用注册、账户授权及 Minecraft Services 是否允许此应用。" &
+                        vbCrLf & "401 可能发生在不同的登录阶段，不能仅凭状态码判断原因。请查看 PCL 日志中最后一条 “开始微软登录步骤” 并保留原始错误以便排查。", LogBehavior.Alert)
                 ElseIf TypeOf ex Is Security.Authentication.AuthenticationException AndAlso ex.Message.Contains("SSL/TLS") Then
                     Logger.Error(ex, $"正版登录验证失败，请考虑在 [设置 → 其他] 中关闭 [在正版登录时验证 SSL 证书]，然后再试。{vbCrLf}{vbCrLf}原始错误信息：", LogBehavior.Alert)
                 Else
@@ -104,5 +107,16 @@ Public Class PageLoginMs
             End Try
         End Sub, "Ms Login")
     End Sub
+
+    '401 可能来自 Microsoft OAuth、Xbox 或 Minecraft Services，必须保留真实阶段信息。
+    Private Shared Function IsMicrosoftHttp401(ex As Exception) As Boolean
+        Dim Current As Exception = ex
+        Do While Current IsNot Nothing
+            If TypeOf Current Is HttpRequestCodeException AndAlso
+               DirectCast(Current, HttpRequestCodeException).StatusCode = System.Net.HttpStatusCode.Unauthorized Then Return True
+            Current = Current.InnerException
+        Loop
+        Return False
+    End Function
 
 End Class

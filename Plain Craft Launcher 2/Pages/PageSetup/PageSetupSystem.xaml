@@ -145,7 +145,7 @@
                     <local:MyCheckBox Margin="0,5,0,4" Text="匿名数据收集" Grid.Row="6" Height="22" Grid.ColumnSpan="2"
                         x:Name="CheckSystemTelemetry" local:SettingService.Key="SystemSystemTelemetry" 
                         ToolTip="当下载失败、PCL 出错、游戏崩溃等事件时，PCL 会匿名上报情况，以通知龙猫 “哦吼，出错了”，让龙猫能更好地修 Bug……&#xa;你可以关闭上报，不过龙猫就不知道你遇到了什么 Bug 了……&#13;PCL 不会上传或收集任何个人信息，包括上报的东西里面也没有！&#xa;详情：https://github.com/Meloong-Git/PCL/discussions/7036" />
-                    <Grid Height="35" Grid.Row="7" Grid.ColumnSpan="5" Margin="0,12,0,0">
+                    <Grid Height="35" Grid.Row="8" Grid.ColumnSpan="5" Margin="0,12,0,0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" SharedSizeGroup="Button" />
                             <ColumnDefinition Width="Auto" SharedSizeGroup="Button" />
@@ -155,7 +155,7 @@
                         <local:MyButton Grid.Column="1" x:Name="BtnSystemSettingExp" MinWidth="140" Text="导出设置" Padding="13,0" Margin="0,0,20,0" />
                         <local:MyButton Grid.Column="2" x:Name="BtnSystemSettingImp" MinWidth="140" Text="导入设置" Padding="13,0" Margin="0,0,20,0" />
                     </Grid>
-                    <Grid Height="35" Grid.Row="8" Grid.ColumnSpan="5" Margin="0,12,0,0" x:Name="PanDonate">
+                    <Grid Height="35" Grid.Row="9" Grid.ColumnSpan="5" Margin="0,12,0,0" x:Name="PanDonate">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" SharedSizeGroup="Button" />
                             <ColumnDefinition Width="Auto" SharedSizeGroup="Button" />
@@ -163,13 +163,14 @@
                         <local:MyButton Grid.Column="0" x:Name="BtnSystemIdentify" MinWidth="140" Text="复制识别码" Padding="13,0" Margin="0,0,20,0" />
                         <local:MyButton Grid.Column="1" x:Name="BtnSystemUnlock" MinWidth="140" Text="输入土豆码" Padding="13,0" Margin="0,0,20,0" />
                     </Grid>
-                    <TextBlock Grid.Row="9" VerticalAlignment="Center" Text="注册表隔离" Margin="0,12,25,0"
-                               ToolTip="隔离时使用开源版独立设置；关闭隔离时与 PCL 正式版共用注册表设置。" />
-                    <local:MyComboBox Grid.Row="9" Grid.Column="1" x:Name="ComboSystemRegistryIsolation"
-                                      Margin="0,12,0,0" ToolTip="修改后重新启动 PCL 生效">
-                        <local:MyComboBoxItem Content="开启隔离（使用独立设置）" />
-                        <local:MyComboBoxItem Content="关闭隔离（共用正式版设置）" />
-                    </local:MyComboBox>
+                    <TextBlock Grid.Row="7" VerticalAlignment="Center" Text="注册表隔离" Margin="0,12,25,0"
+                               ToolTip="开启后使用独立设置；关闭后与正式版共用注册表设置。" />
+                    <StackPanel Grid.Row="7" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,12,0,0">
+                        <TextBlock x:Name="LabSystemRegistryStatus" VerticalAlignment="Center" Margin="0,0,16,0"
+                                   Opacity="0.8" Text="读取中" />
+                        <local:MyButton x:Name="BtnSystemRegistryChange" Text="更改" MinWidth="70" Padding="9,0"
+                                        Height="28" ToolTip="修改注册表隔离设置；重启 PCL 后生效" />
+                    </StackPanel>
                 </Grid>
             </local:MyCard>
 
