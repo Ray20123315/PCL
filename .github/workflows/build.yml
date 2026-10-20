@@ -74,7 +74,7 @@ jobs:
 
   prerelease:
     name: Publish Pre-release
-    if: ${{ (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Release prerelease:')) || (github.event_name == 'workflow_dispatch' && inputs.publish_prerelease) }}
+    if: ${{ github.ref == 'refs/heads/main' && ((github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Release prerelease:')) || (github.event_name == 'workflow_dispatch' && inputs.publish_prerelease)) }}
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -100,6 +100,10 @@ jobs:
           asset="prerelease-dist/Plain Craft Launcher (PCL) - Modrinth Region Checked.exe"
           mv "$original" "$asset"
           tag="pcl-modrinth-region-${GITHUB_SHA:0:8}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Pre-release $tag already exists; keeping the existing verified release."
+            exit 0
+          fi
           cat > prerelease-notes.md <<'NOTES'
           Third-party modified build of Plain Craft Launcher (PCL), not an official PCL release.
 
