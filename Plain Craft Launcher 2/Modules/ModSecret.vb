@@ -211,7 +211,7 @@ Friend Module ModSecret
                 End If
             Next
 
-            Dim CountryCode = If(AnyMainlandChina, "CN", If(ConfirmedCode, ConfirmedCode,
+            Dim CountryCode = If(AnyMainlandChina, "CN", If(ConfirmedCode IsNot Nothing, ConfirmedCode,
                 If(ValidCountries.Count = 1, ValidCountries(0) & "（待核实）", "未知")))
             Dim Allowed As Boolean = Not EnableRegionCheck OrElse
                 (Not AnyMainlandChina AndAlso ConfirmedCode IsNot Nothing AndAlso
