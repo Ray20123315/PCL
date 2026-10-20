@@ -105,15 +105,18 @@ jobs:
             exit 0
           fi
           cat > prerelease-notes.md <<'NOTES'
-          Third-party modified build of Plain Craft Launcher (PCL), not an official PCL release.
+          這是基於 Plain Craft Launcher（PCL）的第三方非官方預發布測試版。
 
-          Change: Modrinth-only community resources; CurseForge network features are paused but source is retained.
-          Mainland China (CN) downloads are denied using best-effort IP and proxy signals; any uncertainty fails closed.
-          No Microsoft Client ID is bundled. This does not guarantee actual GPS location, detect every VPN, or prevent client modification.
-          Preview Windows Release build; not certified for download policy enforcement or Minecraft Services authentication.
+          - **社群資源：** 使用 Modrinth，暫停 CurseForge API 連線，但保留相關原始碼。
+          - **地區檢查：** 依據 IP 出口國家與部分代理／VPN 特徵判斷；中國大陸（CN）或無法確認地區時，停止 Minecraft 下載。
+          - **地區顯示：** 首次進入提示地區與下載可用性，之後在左上角常駐顯示，點擊可重新檢查。
+          - **設定介面：** 登錄檔隔離改為狀態文字與「更改」按鈕，切換後重啟生效。
+          - **Microsoft 正版登入：** 本版本不內建 Client ID；401 訊息已加入診斷說明，但尚未修復或驗證登入服務授權。
 
-          Original PCL project: https://github.com/Meloong-Git/PCL
-          Source and licensing guidance: https://github.com/Ray20123315/PCL/blob/main/LICENCE
+          注意：此檢查僅使用 IP 定位，**不使用 GPS**。無法識別所有 VPN，也不能保證用戶端防竄改或符合所有地區的法規。這是 Windows Release 組態的預發布版，尚未完成 GUI、網路地區與登入功能的實際驗證。
+
+          PCL 原始專案：https://github.com/Meloong-Git/PCL
+          原始碼與授權說明：https://github.com/Ray20123315/PCL/blob/main/LICENCE
           NOTES
           gh release create "$tag" "$asset" \
             --repo "$GITHUB_REPOSITORY" \
